@@ -264,3 +264,96 @@ public class StopThreadUnsafe {
 
 #### 3. 线程中断
 
+线程中断不会使线程立即退出，而是给线程发送一个通知，告知目标线程，有人希望你退出了。至于目标线程接到通知后如何处理，则完全由目标线程自己决定。
+
+```java
+package com.goahead.chapter02;
+
+public class ThreadInterrupt {
+
+    public static void main(String[] args) throws InterruptedException {
+        Thread t1 = new Thread() {
+            @Override
+            public void run() {
+                while (true) {
+                    if (Thread.currentThread().isInterrupted()) {
+                        System.out.println("Interruted");
+                        break;
+                    }
+                    try {
+                        Thread.sleep(2000);
+                    } catch (InterruptedException e) {
+                        System.out.println("Interruted when sleep");
+                        Thread.currentThread().interrupt();
+//                        e.printStackTrace();
+                    }
+                    Thread.yield();
+                }
+            }
+        };
+
+        t1.start();
+        Thread.sleep(1000);
+        t1.interrupt();
+    }
+
+}
+```
+
+#### 4. 等待（wait）和通知（notify）
+
+1. 首先这两个方法不在Thread里边，而是在Object里边，任何对象都可以调用它们。
+2. 当一个对象调用了wait方法后，当前线程就会在这个对象上等待。比如A线程调用了Obj.wait()，则会一直等待其他线程执行obj.notify()
+3. wait方法执行后 会释放掉对象锁，而sleep方法则不会释放任何东西
+
+```java
+package com.goahead.chapter02;
+
+public class SimpleWN {
+
+    final static Object object = new Object();
+
+    public static class T1 extends Thread {
+
+        @Override
+        public void run() {
+            synchronized (object) {
+                System.out.println(System.currentTimeMillis() + " :T1 start!");
+                try {
+                    System.out.println(System.currentTimeMillis() + " :T1 wait for object");
+                    object.wait();
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+                System.out.println(System.currentTimeMillis() + " :T1 End!");
+            }
+        }
+    }
+
+    public static class T2 extends Thread {
+
+        @Override
+        public void run() {
+            synchronized (object) {
+                System.out.println(System.currentTimeMillis() + " :T2 start! Notify one thread");
+                object.notify();
+                System.out.println(System.currentTimeMillis() + " :T2 end!");
+                try {
+                    Thread.sleep(20000);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+            }
+        }
+    }
+
+    public static void main(String[] args) {
+        Thread t1 = new T1();
+        Thread t2 = new T2();
+        t1.start();
+        t2.start();
+    }
+
+}
+```
+
