@@ -357,3 +357,165 @@ public class SimpleWN {
 }
 ```
 
+#### 5. 挂起（suspend）和继续执行（resume）线程
+
+1. 被挂起的线程必须要等到resume方法操作后，才能继续执行。
+2. suspend方法执行后，线程暂停的同时，并不会释放任何锁资源。必须等到该线程执行了resume操作后才可以继续运行，万一resume方法在suspend方法之前执行，那么挂起的线程可能很难有机会继续执行，它占用的锁永远不会释放，系统会有问题。
+
+```java
+package com.goahead.chapter02;
+
+public class BadSuspend {
+
+    public static Object u = new Object();
+
+    static ChangeObjectThread t1 = new ChangeObjectThread("t1");
+    static ChangeObjectThread t2 = new ChangeObjectThread("t2");
+
+    static class ChangeObjectThread extends Thread {
+
+        public ChangeObjectThread(String name) {
+            super.setName(name);
+        }
+
+        @Override
+        public void run() {
+            synchronized (u) {
+                System.out.println("in " + getName());
+                Thread.currentThread().suspend();
+            }
+        }
+    }
+
+    public static void main(String[] args) throws InterruptedException {
+        t1.start();
+        Thread.sleep(100);
+        t2.start();
+        t1.resume();
+        // 如果此处使用Thread.sleep 使得线程 暂停  从而使 子线程先 执行  则不会有问题
+        t2.resume();
+        // join 让主线程等待子线程结束后 再执行
+        // 通过jstack 可以查看 运行的线程
+        t1.join();
+        t2.join();
+    }
+
+}
+```
+
+#### 6. 等待线程结束（join）和谦让（yield）
+
+1. 很多时候一个线程的输入依赖其他一个or多个线程的输入，此时线程需要等待依赖的线程执行完毕后才开始执行。比如SE和开发 一般要等SA调研清楚需求后开工。
+
+2. JDK提供了join的机制，第一个无限制等待，第二个限制时间，超时了就不等了
+
+   ```java
+   public final void join() throws InterruptedException;
+   public final synchronized void join(long millis) throws InterruptedException;
+   ```
+
+3. 举个例子
+
+   ```java
+   package com.goahead.chapter02;
+   
+   public class JoinMain {
+   
+       public volatile static int i = 0;
+   
+       public static class AddThread extends Thread {
+   
+           @Override
+           public void run() {
+               for (i = 0; i < 10000000; i++);
+           }
+       }
+   
+       public static void main(String[] args) throws InterruptedException {
+           AddThread at = new AddThread();
+           at.start();
+   //        at.join();
+           System.out.println(i);
+       }
+   
+   }
+   ```
+
+4. yield是一个静态方法，一旦执行，则当前线程会让出CPU，重新参与CPU竞争。
+
+### 2.3 volatile与Java内存模型（JMM）
+
+1. Java使用了一些特殊的操作或者关键字来声明，告诉虚拟机，在这个地方要尤其注意，不能随意变动优化目标指令，其中volatile就是其中之一。
+
+2. volatile能保证数据的可见性和有序性，但是不能保证原子性。
+
+3. 举个例子
+
+   ```java
+   package com.goahead.chapter02;
+   
+   public class NoVisibility {
+   
+       private volatile static boolean ready;
+   
+       private static int number;
+   
+       private static class ReaderThread extends Thread {
+   
+           @Override
+           public void run() {
+               while (!ready);
+               System.out.println(number);
+           }
+   
+       }
+   
+       public static void main(String[] args) throws InterruptedException {
+           new ReaderThread().start();
+           Thread.sleep(1000);
+           ready = true;
+           number = 44;
+           Thread.sleep(10000);
+       }
+   
+   }
+   ```
+
+### 2.4 分门别类的管理：线程组
+
+1. 如果线程数量众多，但是职责明确，我们可以将相同功能的线程放到一个线程组里边。
+
+2. 举个栗子：
+
+   ```java
+   package com.goahead.chapter02;
+   
+   public class ThreadGroupName implements Runnable {
+   
+       public static void main(String[] args) {
+           ThreadGroup tg = new ThreadGroup("PrintGroup");
+           Thread t1 = new Thread(tg, new ThreadGroupName(), "T1");
+           Thread t2 = new Thread(tg, new ThreadGroupName(), "T2");
+           t1.start();
+           t2.start();
+           System.out.println(tg.activeCount());
+           tg.list();
+       }
+   
+       @Override
+       public void run() {
+           String groupAndName = Thread.currentThread().getThreadGroup().getName() + "-" + Thread.currentThread().getName();
+           while (true) {
+               System.out.println("I am " + groupAndName);
+               try {
+                   Thread.sleep(3000);
+               } catch (InterruptedException e) {
+                   e.printStackTrace();
+               }
+           }
+       }
+   }
+   ```
+
+3. 作者建议大家在创建线程和线程组的时候，给它们取一个好听的名字，定位问题的时候方便，不然就是一堆：Thread-0、Thread-1等等
+
