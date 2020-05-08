@@ -519,3 +519,106 @@ public class BadSuspend {
 
 3. 作者建议大家在创建线程和线程组的时候，给它们取一个好听的名字，定位问题的时候方便，不然就是一堆：Thread-0、Thread-1等等
 
+### 2.5 驻守后台：守护线程（Daemon）
+
+1. 守护线程实在后台默默运行的线程，比如垃圾回收，JIT线程。
+2. 与守护线程相对的就是用户线程，也可以称为系统的工作线程
+3. 当Java应用内只剩下守护线程时候，Java虚拟机会自然的退出
+
+```java
+package com.goahead.chapter02;
+
+public class DaemonDemo {
+
+    public static class DaemonT extends Thread {
+        @Override
+        public void run() {
+            while (true) {
+                System.out.println("I am alive");
+                try {
+                    Thread.sleep(1000);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+            }
+        }
+    }
+
+    public static void main(String[] args) throws InterruptedException {
+        Thread t = new DaemonT();
+        // 如果不设置为守护线程，则主线程结束以后，依然在执行
+//        t.setDaemon(true);
+
+        t.start();
+
+        Thread.sleep(2000);
+    }
+
+}
+```
+
+### 2.6 先做重要的事：线程优先级
+
+1. 优先级越高的线程在竞争资源的时候更有优势，更加可能抢到资源。
+2. 低优先级的线程 有可能会发生饥饿现象，所以在严格的场合，还是需要自己在应用层解决线程调度的问题。
+
+```java
+package com.goahead.chapter02;
+
+public class PriorityDemo {
+
+    public static class HightPriority extends Thread {
+        static int count = 0;
+
+        @Override
+        public void run() {
+            while (true) {
+                synchronized (PriorityDemo.class) {
+                    count++;
+                    if (count > 10000000) {
+                        System.out.println("HightPriority is complete");
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    public static class LowPriority extends Thread {
+        static int count = 0;
+
+        @Override
+        public void run() {
+            while (true) {
+                synchronized (PriorityDemo.class) {
+                    count++;
+                    if (count > 10000000) {
+                        System.out.println("LowPriority is complete");
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    public static void main(String[] args) throws InterruptedException {
+        for (int i = 0; i < 100; i++) {
+            HightPriority high = new HightPriority();
+            LowPriority low = new LowPriority();
+            high.setPriority(Thread.MAX_PRIORITY);
+            low.setPriority(Thread.MIN_PRIORITY);
+            high.start();
+            low.start();
+            Thread.sleep(100);
+            System.out.println(" ========================= ");
+        }
+    }
+
+}
+```
+
+### 2.7 线程安全的概念与关键字synchronized
+
+1. 并行程序设计一大关注重点就是线程安全。
+2. volatile关键字只能保证数据的可见性
+3. 
