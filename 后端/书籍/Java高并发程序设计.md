@@ -621,4 +621,388 @@ public class PriorityDemo {
 
 1. 并行程序设计一大关注重点就是线程安全。
 2. volatile关键字只能保证数据的可见性
-3. 
+3. synchronized关键字是实现线程间的同步，它的工作是对同步的代码块加锁，确保一次只有一个线程进入同步块，它还能保证线程间的可见性和有序性。
+4. 可以作用于：对象，实例方法和静态方法
+
+### 2.8 程序中的幽灵：隐蔽的错误
+
+#### 1. 并发下的ArrayList
+
+多个线程对ArrayList操作，可能导致如下三种情况：
+
+1. 结果正常
+2. 数组越界异常：由于没有锁的保护，另外一个线程访问到不一致的内部状态，导致越界
+3. arraylist的重复写入，结果看着不正常
+
+```java
+package com.goahead.chapter02;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+
+public class ArrayListMultiThread {
+
+    static List<Integer> al = Collections.synchronizedList(new ArrayList<>());
+
+    public static class AddThread implements Runnable {
+
+        @Override
+        public void run() {
+            for (int i = 0; i < 1000000; i++) {
+                al.add(i);
+            }
+        }
+
+    }
+
+    public static void main(String[] args) throws InterruptedException {
+        Thread t1 = new Thread(new AddThread());
+        Thread t2 = new Thread(new AddThread());
+        t1.start();
+        t2.start();
+        t1.join();
+        t2.join();
+        System.out.println(al.size());
+    }
+
+}
+```
+
+解决方案：
+
+1. 使用Vector代替ArrayList
+2. 使用Collections.synchronizedList(new ArrayList<>());
+
+#### 2. 并发下诡异的HashMap
+
+1. HashMap本身是性能不安全的
+2. JDK7 线程冲突下的HashMap有可能出现环链，死循环
+
+3. 并发场景下推荐使用：ConcurrentHashMap
+
+#### 3. 初学者常见的问题：错误的加锁
+
+如下代码，有问题：
+
+```java
+package com.goahead.chapter02;
+
+public class BadLockOnInteger implements Runnable {
+
+    public static Integer i = 0;
+
+    static BadLockOnInteger instance = new BadLockOnInteger();
+
+    @Override
+    public void run() {
+        for (int j = 0; j < 120; j++) {
+            synchronized (i) {
+                i++;
+            }
+        }
+    }
+
+    public static void main(String[] args) throws InterruptedException {
+        Thread t1 = new Thread(instance);
+        Thread t2 = new Thread(instance);
+        t1.start();
+        t2.start();
+        t1.join();
+        t2.join();
+        System.out.println(i);
+    }
+}
+```
+
+如上代码有个冷知识：Integer默认-128到127是固定的对象，IntegerCache.cache数组存放，-128是默认的，127可以通过虚拟机参数更改-Djava.lang.Integer.IntegerCache.high=10000
+
+## 第3章 JDK并发包
+
+> JDK为了更好的支持并发程序，提供了大量实用的API和框架
+
+### 3.1 多线程的团队协作：同步控制
+
+> synchronized, wait, notify完成了对临界区的访问控制，它们的增强版是：重入锁
+
+#### 1. 关键字synchronized的功能扩展：重入锁
+
+> 重入锁可以完全替代关键字synchronized，JDK5.0之前冲入锁的性能要比synchronized好很多
+
+```java
+package com.goahead.chapter02;
+
+import java.util.concurrent.locks.ReentrantLock;
+
+public class ReenterLock implements Runnable {
+
+    public static ReentrantLock lock = new ReentrantLock();
+
+    public static int i = 0;
+
+    @Override
+    public void run() {
+        for (int j = 0; j < 10000000; j++) {
+            lock.lock();
+            try {
+                i++;
+            } finally {
+                lock.unlock();
+            }
+        }
+    }
+
+    public static void main(String[] args) throws InterruptedException {
+        ReenterLock reenterLock = new ReenterLock();
+        Thread t1 = new Thread(reenterLock);
+        Thread t2 = new Thread(reenterLock);
+        t1.start();
+        t2.start();
+        t1.join();
+        t2.join();
+        System.out.println(i);
+    }
+
+}
+```
+
+重入锁的特点：
+
+- 显示的操作过程，开发人员必须手动指定何时加锁，何时释放锁。
+
+- 注意：必须在退出临界区时，释放掉自己持有的锁。
+
+- 为何叫重入锁（Re-Entrant-Lock）？因为这个锁是可以反复进入的，比如下面的代码：
+
+  ```java
+  lock.lock();
+  lock.lock();
+  try {
+  	i++;
+  } finally {
+  	lock.unlock();
+      lock.unlock();
+  }
+  ```
+
+重入锁提供了中断处理能力
+
+1. 中断响应
+
+   synchronized关键字，如果一个线程在等待锁，它只有两种情况发生：要么获得锁继续执行，要么一直等待锁。相对于synchronized，重入锁提供了一个机制：等待锁的过程是可以中断的，即某一线程在等待锁的过程中，程序可以根据需要取消对锁的请求。
+
+   ```java
+   package com.goahead.chapter03;
+   
+   import java.util.concurrent.locks.ReentrantLock;
+   
+   public class IntLock implements Runnable {
+   
+       public static ReentrantLock lock1 = new ReentrantLock();
+       public static ReentrantLock lock2 = new ReentrantLock();
+   
+       int lock;
+   
+       public IntLock(int lock) {
+           this.lock = lock;
+       }
+   
+       @Override
+       public void run() {
+           try {
+               if (lock == 1) {
+                   lock1.lockInterruptibly();
+                   try {
+                       Thread.sleep(500);
+                   } catch (InterruptedException e) {
+                       e.printStackTrace();
+                   }
+                   lock2.lockInterruptibly();
+               } else {
+                   lock2.lockInterruptibly();
+                   try {
+                       Thread.sleep(500);
+                   } catch (InterruptedException e) {
+                       e.printStackTrace();
+                   }
+                   lock1.lockInterruptibly();
+               }
+           } catch (InterruptedException e) {
+               e.printStackTrace();
+           } finally {
+               if (lock1.isHeldByCurrentThread()) {
+                   lock1.unlock();
+               }
+               if (lock2.isHeldByCurrentThread()) {
+                   lock2.unlock();
+               }
+               System.out.println(Thread.currentThread().getId() + ": 线程退出");
+           }
+       }
+   
+       public static void main(String[] args) throws InterruptedException {
+           IntLock r1 = new IntLock(1);
+           IntLock r2 = new IntLock(2);
+           Thread t1 = new Thread(r1);
+           Thread t2 = new Thread(r2);
+           t1.start();
+           t2.start();
+           Thread.sleep(1000);
+           t1.interrupt();
+       }
+   }
+   ```
+
+2. 锁申请等待限时
+
+   > 通常我们无法判断为什么线程一直获取不到锁，有可能是死锁了，也有可能饥饿了。如果给定一个等待时间，让线程自动放弃，对系统来说是有意义的。
+
+   使用tryLock方法实现锁等待超时：
+
+   ```java
+   package com.goahead.chapter03;
+   
+   import java.util.concurrent.TimeUnit;
+   import java.util.concurrent.locks.ReentrantLock;
+   
+   public class TimeLock implements Runnable {
+   
+       public static ReentrantLock lock = new ReentrantLock();
+   
+       @Override
+       public void run() {
+           try {
+               if (lock.tryLock(5, TimeUnit.SECONDS)) {
+                   System.out.println(Thread.currentThread().getName() + "获取锁成功");
+                   Thread.sleep(6000);
+               } else {
+                   System.out.println(Thread.currentThread().getName() + "获取锁失败");
+               }
+           } catch (InterruptedException e) {
+               e.printStackTrace();
+           } finally {
+               if (lock.isHeldByCurrentThread()) {
+                   lock.unlock();
+               }
+           }
+       }
+   
+       public static void main(String[] args) {
+           Thread t1 = new Thread(new TimeLock(), "t1");
+           Thread t2 = new Thread(new TimeLock(), "t2");
+           t1.start();
+           t2.start();
+       }
+   }
+   ```
+
+3. 公平锁
+
+   - 大部分情况下，锁都是不公平的。
+   - 公平锁可以避免饥饿的情况发生。
+   - 公平锁由于系统需要维护一个队列，所以性能非常低。如果没有什么特殊要求，则不要使用公平锁。
+
+   ```java
+   package com.goahead.chapter03;
+   
+   import java.util.concurrent.locks.ReentrantLock;
+   
+   public class FairLock implements Runnable {
+   
+   //    public static ReentrantLock fairLock = new ReentrantLock(true);
+       public static ReentrantLock fairLock = new ReentrantLock(false);
+   
+       @Override
+       public void run() {
+           while (true) {
+               fairLock.lock();
+               System.out.println(Thread.currentThread().getName() + " 获取到锁");
+               fairLock.unlock();
+           }
+       }
+   
+       public static void main(String[] args) {
+           FairLock item = new FairLock();
+           Thread t1 = new Thread(item, "t1");
+           Thread t2 = new Thread(item, "t2");
+           t1.start();
+           t2.start();
+       }
+   }
+   ```
+
+**总结**：
+
+重入锁有如下的**函数：**
+
+| 函数名            | 作用                               |
+| ----------------- | ---------------------------------- |
+| lock              | 加锁，等待                         |
+| lockInterruptibly | 加锁，优先响应中断事件             |
+| tryLock-无参      | 获取锁，获取不到则放弃，获取到继续 |
+| tryLock-有参      | 获取锁，如果超时，则放弃           |
+| unlock            | 释放锁                             |
+
+重入锁的**实现：**
+
+1. **原子状态：**使用CAS来存储当前锁的状态，判断锁是否已经被别的线程持有了。
+2. **等待队列：**所有没有请求到锁的线程，会进入等待队列进行等待。待有线程释放锁后，系统就能从等待队列中唤醒一个线程，继续工作。
+3. **阻塞原语**park和unpark，用来挂起和恢复线程。
+
+#### 2. 重入锁的好搭档：condition
+
+> condition和wait/notify的原理类似，不过wait和notify是配合关键字synchronized使用的。
+
+如下简单演示了Condition的功能：
+
+```java
+package com.goahead.chapter03;
+
+import java.util.concurrent.locks.Condition;
+import java.util.concurrent.locks.ReentrantLock;
+
+public class ReenterLockCondition implements Runnable {
+
+    public static ReentrantLock lock = new ReentrantLock();
+
+    public static Condition condition = lock.newCondition();
+
+    @Override
+    public void run() {
+        try {
+            lock.lock();
+            // 调用后，该线程将释放掉自己的锁
+            System.out.println(Thread.currentThread().getName() + ": Thread is going on");
+            condition.await();
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        } finally {
+            condition.signal();
+            lock.unlock();
+        }
+    }
+
+    public static void main(String[] args) throws InterruptedException {
+        ReenterLockCondition reenterLockCondition = new ReenterLockCondition();
+        Thread t1 = new Thread(reenterLockCondition, "t1");
+        Thread t2 = new Thread(reenterLockCondition, "t2");
+        t1.start();
+        t2.start();
+        System.out.println("主线程停顿2秒哈");
+        Thread.sleep(2000);
+        lock.lock();
+        // 系统会从当前Condition对象的等待队列中唤醒一个线程
+        condition.signal();
+        lock.unlock();
+    }
+}
+```
+
+#### 3. 允许多个线程同时访问：信号量（Semaphore）
+
+
+
+
+
+
+
