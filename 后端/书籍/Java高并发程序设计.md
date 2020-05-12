@@ -1000,9 +1000,134 @@ public class ReenterLockCondition implements Runnable {
 
 #### 3. 允许多个线程同时访问：信号量（Semaphore）
 
+> 信号量是对锁的扩展。无论是内部锁synchronized还是重入锁reentrantLock，一次都只允许一个线程访问一个资源，而信号量可以访问多个。
 
+举个semaphore的小栗子：
 
+```java
+package com.goahead.chapter03;
 
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Semaphore;
+
+public class SemaphoreDemo implements Runnable {
+
+    final Semaphore semp = new Semaphore(5);
+
+    @Override
+    public void run() {
+        try {
+            semp.acquire();
+            Thread.sleep(2000);
+            System.out.println(Thread.currentThread().getName() + ": done!");
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        } finally {
+            semp.release();
+        }
+    }
+
+    public static void main(String[] args) {
+        ExecutorService exec = Executors.newFixedThreadPool(20);
+        final SemaphoreDemo demo = new SemaphoreDemo();
+        for (int i = 0; i < 20; i++) {
+            exec.submit(demo);
+        }
+    }
+
+}
+```
+
+#### 4. ReadWriteLock读写锁
+
+> 读写分离锁可以有效地帮助减少锁竞争，提升性能。
+
+重入锁和内部锁在任何情况下，一个线程都会阻塞其他线程的执行。而我们知道所有的读线程在一起工作的时候并不会破坏数据的完整性，其实是可以并行执行的。
+
+从上边的表述来看：如果一个系统读操作的次数远远大于写的操作次数，使用读写锁可以有效的提升系统的性能。
+
+举个栗子：
+
+```java
+package com.goahead.chapter03;
+
+import java.time.Instant;
+import java.util.Random;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
+
+public class ReadWriteLockDemo {
+
+    private static Lock lock = new ReentrantLock();
+
+    private static ReentrantReadWriteLock reentrantReadWriteLock = new ReentrantReadWriteLock();
+
+    private static Lock readLock = reentrantReadWriteLock.readLock();
+
+    private static Lock writeLock = reentrantReadWriteLock.writeLock();
+
+    private int value;
+
+    public Object handleRead(Lock lock) throws InterruptedException {
+        try {
+            lock.lock();
+            Thread.sleep(1000);
+            return value;
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    public void handleWrite(Lock lock, int index) throws InterruptedException {
+        try {
+            lock.lock();
+            Thread.sleep(1000);
+            value = index;
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    public static void main(String[] args) {
+        long startTime = Instant.now().toEpochMilli();
+        final ReadWriteLockDemo demo = new ReadWriteLockDemo();
+        Runnable readRunnable = new Runnable() {
+            @Override
+            public void run() {
+                try {
+//                    demo.handleRead(readLock);
+                    demo.handleRead(lock);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+            }
+        };
+        Runnable writeRunnable = new Runnable() {
+            @Override
+            public void run() {
+                try {
+//                    demo.handleWrite(writeLock, new Random().nextInt());
+                    demo.handleWrite(lock, new Random().nextInt());
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+            }
+        };
+
+        for (int i = 0; i < 18; i++) {
+            new Thread(readRunnable).start();
+        }
+        for (int i = 18; i < 20; i++) {
+            new Thread(writeRunnable).start();
+        }
+        long endTime = Instant.now().toEpochMilli();
+        System.out.println(endTime - startTime);
+    }
+
+}
+```
 
 
 
