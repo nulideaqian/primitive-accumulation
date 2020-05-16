@@ -1129,5 +1129,154 @@ public class ReadWriteLockDemo {
 }
 ```
 
+#### 5. 倒计数器：CountDownLatch
 
+它常用与控制线程等待，即主线程等待倒数计数器结束后，再开始执行。
+
+```java
+package com.goahead.chapter03;
+
+import java.util.Random;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+public class CountDownLatchDemo implements Runnable {
+
+    static final CountDownLatch end = new CountDownLatch(10);
+
+    static final CountDownLatchDemo demo = new CountDownLatchDemo();
+
+    @Override
+    public void run() {
+        try {
+            Thread.sleep(new Random().nextInt(10)*1000);
+            System.out.println("Check complete");
+            end.countDown();
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+    }
+
+    public static void main(String[] args) throws InterruptedException {
+        ExecutorService exec = Executors.newFixedThreadPool(10);
+        for (int i = 0; i < 10; i++) {
+            exec.submit(demo);
+        }
+        end.await();
+        System.out.println("Fire");
+        exec.shutdown();
+    }
+
+}
+```
+
+#### 6. 循环栅栏
+
+举个栗子：
+
+```java
+package com.goahead.chapter03;
+
+import java.util.Random;
+import java.util.concurrent.BrokenBarrierException;
+import java.util.concurrent.CyclicBarrier;
+
+public class CyclicBarrierDemo {
+
+    public static class Solider implements Runnable {
+
+        private String solider;
+
+        private final CyclicBarrier cyclic;
+
+        public Solider(String solider, CyclicBarrier cyclic) {
+            this.solider = solider;
+            this.cyclic = cyclic;
+        }
+
+        @Override
+        public void run() {
+            try {
+                cyclic.await();
+                doWork();
+                cyclic.await();
+            } catch (InterruptedException | BrokenBarrierException e) {
+                e.printStackTrace();
+            }
+        }
+
+        void doWork() {
+            try {
+                Thread.sleep(Math.abs(new Random().nextInt()%10000));
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+            System.out.println(solider + " 任务完成");
+        }
+    }
+
+    public static class BarrierRun implements Runnable {
+
+        boolean flag;
+
+        int N;
+
+        public BarrierRun(boolean flag, int n) {
+            this.flag = flag;
+            N = n;
+        }
+
+        @Override
+        public void run() {
+            if (flag) {
+                System.out.println("司令：【士兵" + N + "个，完成任务啦啦啦啦");
+            } else {
+                System.out.println("司令：【士兵" + N + "个，集合完毕");
+                flag = true;
+            }
+        }
+    }
+
+    public static void main(String[] args) throws InterruptedException {
+        final int N = 10;
+        Thread[] allSoldier = new Thread[N];
+        boolean flag = false;
+        CyclicBarrier cyclic = new CyclicBarrier(N*2, new BarrierRun(flag, N));
+        System.out.println("集合队伍");
+        for (int i = 0; i < N; i++) {
+            System.out.println("士兵 " + i + " 报道!");
+            allSoldier[i] = new Thread(new Solider("士兵" + i, cyclic));
+            allSoldier[i].start();
+            Thread.sleep(200);
+        }
+    }
+
+}
+```
+
+关于InterruptedException异常：在线程的等待过程中，线程被中断了。
+
+#### 7. 线程阻塞工具类：LockSupport
+
+作用：它可以在线程任何位置让线程阻塞
+
+LockSupport的静态方法park()可以阻塞当前线程。
+
+### 3.2 线程复用：线程池
+
+> 线程如果不加以控制和管理，反而会对性能产生不利的影响
+>
+> 当线程数量太多的时候，有可能会耗尽CPU和内存资源
+>
+> 1. 虽然线程是轻量级的工具，但是其本身创建和关闭需要花费很长时间
+> 2. 线程本身也是要消耗内存空间的，大量的线程会抢占宝贵的资源，如果处理不当，会造成OOM的异常。
+>
+> 所以对线程的使用需要掌握一个度
+
+#### 1. 什么是线程池
+
+使用线程池，创建线程变成了从线程池中获取空闲线程，关闭线程变成了向线程池中归还线程。
+
+#### 2. 不要重复发明轮子：JDK对线程的支持
 
