@@ -1280,3 +1280,256 @@ LockSupport的静态方法park()可以阻塞当前线程。
 
 #### 2. 不要重复发明轮子：JDK对线程的支持
 
+> JDK提供了一整套Executor框架
+>
+> Executor，ExecutorService，AbstractExecutorService，ThreadPoolExecutor，Executors(工厂)
+>
+> Executor框架提供了两大类的线程池：ExecutorService和ScheduleExecutorService
+
+1. 固定大小的线程池
+
+   ```java
+   package com.goahead.chapter03;
+   
+   import java.util.concurrent.ExecutorService;
+   import java.util.concurrent.Executors;
+   
+   public class ThreadPoolDemo {
+   
+       public static class MyTask implements Runnable {
+   
+           @Override
+           public void run() {
+               System.out.println(System.currentTimeMillis() + ": Thread ID: " + Thread.currentThread().getId());
+               try {
+                   Thread.sleep(1000);
+               } catch (InterruptedException e) {
+                   e.printStackTrace();
+               }
+           }
+       }
+   
+       public static void main(String[] args) {
+           MyTask myTask = new MyTask();
+   //        ExecutorService es = Executors.newFixedThreadPool(5);
+           ExecutorService es = Executors.newCachedThreadPool();
+           for (int i = 0; i < 10; i++) {
+               es.submit(myTask);
+               try {
+                   Thread.sleep(500);
+               } catch (InterruptedException e) {
+                   e.printStackTrace();
+               }
+           }
+       }
+   
+   }
+   ```
+
+   ```java
+   package com.goahead.chapter03;
+   
+   import java.time.LocalDateTime;
+   import java.util.concurrent.Executors;
+   import java.util.concurrent.ScheduledExecutorService;
+   import java.util.concurrent.TimeUnit;
+   
+   public class ScheduledExecutorServiceDemo {
+   
+       public static void main(String[] args) {
+           ScheduledExecutorService ses = Executors.newScheduledThreadPool(10);
+           ses.scheduleAtFixedRate(new Runnable() {
+               @Override
+               public void run() {
+                   try {
+                       Thread.sleep(1000);
+                       LocalDateTime now = LocalDateTime.now();
+                       System.out.println(now.getHour() + ": " + now.getMinute() + ": " + now.getSecond());
+                   } catch (InterruptedException e) {
+                       e.printStackTrace();
+                   }
+               }
+           }, 0, 2, TimeUnit.SECONDS);
+       }
+   
+   }
+   ```
+
+   ps:
+
+   1. 如果任务遇到异常，那么后续的所有子任务都会停止调度。
+   2. 周期如果太短，那么任务就会在上一个任务结束后立即被调用。
+
+#### 3. 刨根究底：核心线程池的内部实现
+
+1. newFixedThreadPool，newSingleThreadPool和newCachedThreadPool都是ThreadPoolExecutor类的具体表现。
+2. 理解线程池的核心参数：核心线程数，最大线程数，空闲线程存活时间，任务队列，拒绝策略
+
+#### 4. 超负载了怎么办：拒绝策略
+
+代码示例:
+
+```java
+package com.goahead.chapter03;
+
+import java.util.concurrent.*;
+
+public class RejectThreadPoolDemo {
+
+    public static class MyTask implements Runnable {
+
+        @Override
+        public void run() {
+            System.out.println(System.currentTimeMillis() + ": Thread ID: " + Thread.currentThread().getId());
+            try {
+                Thread.sleep(100);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        }
+
+    }
+
+    public static void main(String[] args) throws InterruptedException {
+        MyTask task = new MyTask();
+        ExecutorService es = new ThreadPoolExecutor(5, 5, 0L, TimeUnit.MILLISECONDS, new LinkedBlockingDeque<>(10),
+                Executors.defaultThreadFactory(),
+                (r, executor) -> System.out.println(r.toString() + " is discard"));
+        for (int i = 0; i < Integer.MAX_VALUE; i++) {
+            es.submit(task);
+            Thread.sleep(10);
+        }
+    }
+
+}
+```
+
+#### 5. 自定义线程创建：ThreadFactory
+
+1. ThreadFactory是一个接口，它只有一个创建线程的方法：Thread newThread(Runnable r);
+
+2. 使用自定义线程，我们可以很好的跟踪线程的创建，命名和优先级等信息；使得我们更加自由的控制线程池中所有线程的状态。比如我们可以将创建的线程自定义为守护线程Deamon
+
+#### 6. 我的应用我做主：扩展线程池
+
+1. 在实际应用中，可以对其进行扩展来实现对线程池运行状态的跟踪，输出一些有用的调试信息，以帮助信息诊断，对于错误排查是非常有用的。
+
+举个栗子：
+
+```java
+package com.goahead.chapter03;
+
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.LinkedBlockingDeque;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+
+public class ExtThreadPool {
+
+    public static class MyTask implements Runnable {
+
+        public String name;
+
+        public MyTask(String name) {
+            this.name = name;
+        }
+
+        @Override
+        public void run() {
+            System.out.println("正在执行: " + ": Thread ID: " + Thread.currentThread().getId() + ", Task Name = " + name);
+            try {
+                Thread.sleep(100);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        }
+
+    }
+
+    public static void main(String[] args) throws InterruptedException {
+        ExecutorService es = new ThreadPoolExecutor(5, 5, 0L, TimeUnit.MILLISECONDS, new LinkedBlockingDeque<Runnable>()) {
+            @Override
+            protected void beforeExecute(Thread t, Runnable r) {
+                System.out.println("准备执行: " + ((MyTask)r).name);
+            }
+
+            @Override
+            protected void afterExecute(Runnable r, Throwable t) {
+                System.out.println("执行完成: " + ((MyTask)r).name);
+            }
+
+            @Override
+            protected void terminated() {
+                System.out.println("线城池退出");
+            }
+        };
+        for (int i = 0; i < 10; i++) {
+            MyTask task = new MyTask("TASK-GEYM-" + i);
+            es.execute(task);
+            Thread.sleep(10);
+        }
+        es.shutdown();
+    }
+
+}
+```
+
+#### 7. 合理的选择：优化线程池线程数量
+
+1. 线程池的大小对系统的性能有着一定的影响。
+2. 只要避免极大和极小极端情况，线程池的大小对系统的影响并不会太大。
+
+#### 8. 堆栈去哪里了：在线程池中寻找堆栈
+
+两种方式提交任务可以打印任务的堆栈异常：
+
+- 使用execute方法
+- 或者将submit的结果返回，调用其get方法
+
+为了打印业务日志上下文，自定义线程池例子：
+
+```java
+package com.goahead.chapter03;
+
+import java.util.concurrent.*;
+
+public class TraceThreadPoolExecutor extends ThreadPoolExecutor {
+
+    public TraceThreadPoolExecutor(int corePoolSize, int maximumPoolSize, long keepAliveTime, TimeUnit unit, BlockingQueue<Runnable> workQueue) {
+        super(corePoolSize, maximumPoolSize, keepAliveTime, unit, workQueue);
+    }
+
+    @Override
+    public void execute(Runnable command) {
+        super.execute(wrap(command, clientTrace(), Thread.currentThread().getName()));
+    }
+
+    @Override
+    public Future<?> submit(Runnable task) {
+        return super.submit(wrap(task, clientTrace(), Thread.currentThread().getName()));
+    }
+
+    private Exception clientTrace() {
+        return new Exception("Client stack trace");
+    }
+
+    private Runnable wrap(final Runnable task, final Exception clientStack, String clientThreadName) {
+        return new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    task.run();
+                } catch (Exception e) {
+                    clientStack.printStackTrace();
+                    throw e;
+                }
+            }
+        };
+    }
+}
+```
+
+#### 9. 分而治之：Fork/Join框架
+
+1. 当一个线程企图帮助另外一个线程的时候，往往从任务队列底部开始获取数据，而线程自己本身从顶部获取数据，因此这么操作有利于避免数据竞争。
+2. 你可以向ForkJoinPool线程池提交一个ForkJoinTask任务。所谓的ForkJoinTask任务就是支持fork()方法分解以及join方法等待的任务。
