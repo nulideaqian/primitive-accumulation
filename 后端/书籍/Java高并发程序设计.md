@@ -1532,4 +1532,126 @@ public class TraceThreadPoolExecutor extends ThreadPoolExecutor {
 #### 9. 分而治之：Fork/Join框架
 
 1. 当一个线程企图帮助另外一个线程的时候，往往从任务队列底部开始获取数据，而线程自己本身从顶部获取数据，因此这么操作有利于避免数据竞争。
+
 2. 你可以向ForkJoinPool线程池提交一个ForkJoinTask任务。所谓的ForkJoinTask任务就是支持fork()方法分解以及join方法等待的任务。
+
+   举个例子：
+
+   ```java
+   package com.goahead.chapter03;
+   
+   import java.util.ArrayList;
+   import java.util.concurrent.ExecutionException;
+   import java.util.concurrent.ForkJoinPool;
+   import java.util.concurrent.ForkJoinTask;
+   import java.util.concurrent.RecursiveTask;
+   
+   public class CountTask extends RecursiveTask<Long> {
+   
+       private static final int THRESHOLD = 10000;
+   
+       private long start;
+   
+       private long end;
+   
+       public CountTask(long start, long end) {
+           this.start = start;
+           this.end = end;
+       }
+   
+       public Long compute() {
+           long sum = 0;
+           boolean canCompute = (end - start) < THRESHOLD;
+           if (canCompute) {
+               for (long i = start; i <= end; i++) {
+                   sum += i;
+               }
+           } else {
+               long step = (start + end) / 100;
+               ArrayList<CountTask> subTasks = new ArrayList<>();
+               long pos = start;
+               for (int i = 0; i < 100; i++) {
+                   long lastOne = pos + step;
+                   if (lastOne > end) {
+                       lastOne = end;
+                   }
+                   CountTask subTask = new CountTask(pos, lastOne);
+                   pos += step + 1;
+                   subTasks.add(subTask);
+                   subTask.fork();
+               }
+               for (CountTask t: subTasks) {
+                   // 此处join方法和Thread的不同，它是ForkJoinTask中的方法
+                   sum += t.join();
+               }
+           }
+           return sum;
+       }
+   
+       public static void main(String[] args) {
+           ForkJoinPool forkJoinPool = new ForkJoinPool();
+           CountTask task = new CountTask(0, 200000L);
+           ForkJoinTask<Long> result = forkJoinPool.submit(task);
+           try {
+               Long res = result.get();
+               System.out.println("sum = " + res);
+           } catch (InterruptedException e) {
+               e.printStackTrace();
+           } catch (ExecutionException e) {
+               e.printStackTrace();
+           }
+       }
+   
+   }
+   ```
+
+   - 使用fork()方法提交子任务
+   - 任务不能划分的层次很多，有可能创建很多线程，导致性能严重下降；
+   - 函数调用栈增多，最终导致栈溢出
+
+#### 10. Guava中对线程池的扩展
+
+1. 特殊的DirectExecutor线程池
+
+   它并没有真的创建或使用额外线程，他总是将任务在当前线程中直接执行。
+
+   软件从设计的角度来说，抽象是软件设计的根本和精髓。我们总是希望并且倾向于使用通用代码来处理不同的场景，因此需要对不同的场景进行他统一的建模和抽象。
+
+   ```java
+   public static void main(String[] args) throws InterruptedException {
+           Executor executor = MoreExecutors.directExecutor();
+           executor.execute(() -> System.out.println("I am running in " + Thread.currentThread().getName()));
+       }
+   ```
+
+2. Deamon线程池
+
+   使用MoreExecutors.getExitingExecutorService(executor);可以将普通线程池转化为Daemon线程池的方法。
+
+   ```java
+       public static void main(String[] args) throws InterruptedException {
+           ThreadPoolExecutor executor = (ThreadPoolExecutor) Executors.newFixedThreadPool(2);
+           // 如果没有下面这行，因线程池的存在，应用无法正常结束
+   //        MoreExecutors.getExitingExecutorService(executor);
+           executor.execute(() -> System.out.println("I am running in " + Thread.currentThread().getName()));
+       }
+   ```
+
+### 3.3 不要重复发明轮子：JDK的并发容器
+
+#### 1. 超好用的工具类：并发集合简介
+
+| 名称                  | 值                  | 说明                   |
+| --------------------- | ------------------- | ---------------------- |
+| ConcurrentHashMap     | 高效的并发HashMap   |                        |
+| CopyOnWriteArrayList  | 线程安全的ArrayList | 适合读多写少的场景     |
+| ConcurrentLinkedQueue | 高效的并发队列      | 使用链表实现           |
+| BlockingQueue         | 阻塞队列            | 适合作为数据共享的通道 |
+| ConcurrentSkipListMap | 跳表的实现          |                        |
+
+#### 2. 线程安全的HashMap
+
+两种方式：
+
+1. Collections.synchronizedMap(new HashMap<>()); -- 性能不是太好，建议使用第二种
+2. ConcurrentHashMap
