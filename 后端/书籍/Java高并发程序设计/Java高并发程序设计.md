@@ -1655,3 +1655,170 @@ public class TraceThreadPoolExecutor extends ThreadPoolExecutor {
 
 1. Collections.synchronizedMap(new HashMap<>()); -- 性能不是太好，建议使用第二种
 2. ConcurrentHashMap
+
+#### 3. 有关List的线程安全
+
+Vector是线程安全的
+
+ArrayList和LinkedList两个都不是线程安全的
+
+可以使用Collections.synchronizedList()包装任意List
+
+#### 4. 高效读写的队列：深度剖析ConcurrentLinkedQueue类
+
+1. 其使用了无锁的机制保证了线程安全，所以高效
+
+#### 5. 高效读取：不变模式下的CopyOnWriteArrayList类
+
+1. 在很多应用场景中，读操作可能会远远大于写操作。
+2. 写和写之间通过同步代码块，加锁来保证
+3. 读和写之间通过volatile，可见性来保证
+
+#### 6. 数据共享通道：BlockingQueue
+
+> 多个线程间的数据通过什么手段共享呢？
+
+1. 一般来说，我们都希望整个系统是松散耦合的。
+2. 其中take和put方法，是阻塞的，而插入的数据或者啥的时候，会调用Condition的singal方法。
+
+#### 7. 随机数据结构：跳表(Skip List)
+
+> 跳表是一个可以用来快速查找的数据结构，有些类似于平衡树。
+>
+> 不过平衡树每次插入的时候要对整个属进行加锁，性能不好，跳表可以实现局部加锁。
+
+跳表同时维护了多个链表，底层链表维护了跳表内的所有元素，每上面一层链表都是下面的链表子集，这样遍历的时候可以从上层逐层向下遍历，跳着向前遍历。
+
+跳表算法用空间换时间。
+
+跳表的key和hash算法不同的是，跳表的key是有序的。
+
+```java
+public static void main(String[] args) throws InterruptedException {
+        ConcurrentSkipListMap<Integer, String> stus = new ConcurrentSkipListMap<>();
+//        Map<Integer, String> stus = new HashMap<>();
+        stus.put(10, "wangqian");
+        stus.put(22, "wangqian2");
+        stus.put(31, "wangqian3");
+        for (Map.Entry<Integer, String> item: stus.entrySet()) {
+            System.out.println(item.getKey() + " ==== " + item.getValue());
+        }
+    }
+```
+
+### 3.4 使用JMH进行性能测试
+
+#### 1. 什么是JMH
+
+JMH（Java Microbenchmark Harness）是一个在OpenJDK项目中发布的，专门用于测试的框架，其精度可以达到毫秒级。通过它可以对多个方法的性能进行定量分析。
+
+#### 2. Hello JMH
+
+1. 通过maven方式引入jar包依赖：org.openjdk.jmh:jmh-core; org.openjdk.jmh:jmh-generator-annprocess
+
+```java
+package com.goahead.chapter03;
+
+import org.openjdk.jmh.annotations.Benchmark;
+import org.openjdk.jmh.annotations.BenchmarkMode;
+import org.openjdk.jmh.annotations.Mode;
+import org.openjdk.jmh.annotations.OutputTimeUnit;
+import org.openjdk.jmh.runner.Runner;
+import org.openjdk.jmh.runner.RunnerException;
+import org.openjdk.jmh.runner.options.Options;
+import org.openjdk.jmh.runner.options.OptionsBuilder;
+
+import java.util.concurrent.TimeUnit;
+
+@BenchmarkMode(Mode.AverageTime)
+@OutputTimeUnit(TimeUnit.MILLISECONDS)
+public class JMHSample_01_HelloWorld {
+
+    @Benchmark
+    public void wellHelloThere() throws InterruptedException {
+        Thread.sleep(100);
+    }
+
+    public static void main(String[] args) throws RunnerException {
+        Options opt = new OptionsBuilder().include(JMHSample_01_HelloWorld.class.getSimpleName())
+                .forks(1).build();
+        new Runner(opt).run();
+    }
+}
+```
+
+#### 3. JMH的基本概念和配置
+
+1. 模式（Mode）
+
+   - Throughput：整体吞吐量，表示1秒内可以执行多少次调用。
+   - AverageTime：调用的平均的时间，指每一次调用所需要的时间。
+   - SampleTime：随机取样
+   - SingleShotTime：
+
+2. 迭代（Iteration）
+
+   它是JMH的测量单位。在大部分测试模式下，一次迭代表示1秒。
+
+3. 预热（Warmup）
+
+   由于Java虚拟机的JIT存在，同一个方法在JIT前后的时间将会不同。通常只考虑在JIT编译后的性能。
+
+4. 状态（State）
+
+   通过State可以指定一个对象的作用范围。一种是线程范围，一个对象只有一个线程访问。另一种是基准测试范围，多个线程共享一个实例。
+
+5. 配置类（Options/OptionsBuilder）
+
+#### 4. 理解JMH中的Mode
+
+## 第4章 锁的优化及注意事项
+
+> 锁是最常用的同步方法之一。
+
+### 4.1 有助于提高锁性能的几点建议
+
+锁的竞争必然会导致程序的整体性能下降。
+
+#### 1. 减少锁的持有时间
+
+应尽可能地减少对某个锁的占用时间，以减少线程间互斥的可能。
+
+只在必要的时候进行同步，这样就能明显减少线程持有锁的时间，提高系统的吞吐量。
+
+#### 2. 减少锁粒度
+
+典型的技术应用场景：ConcurrentHashMap类
+
+它内部细分了多个小的HashMap，称为段（SEGMENT）。在默认情况下，一个ConcurrentHashMap类可以被分为16个段。
+
+但是减少锁粒度也会带来新的问题，当系统需要获取全局锁的时候，其消耗的资源比较多。
+
+#### 3. 使用读写分离锁来代替独占锁
+
+在读多写少的场景，读写锁对系统性能是很有好处的。
+
+#### 4. 锁分离
+
+读写锁根据读写操作功能上的不同，进行了有效的锁分离。依据应用程序的功能特点，使用类似的分离思想，也可以对独占锁进行分离，比如ArrayBlockingQueue使用了两个锁。
+
+#### 5. 锁粗化
+
+如果对一个锁不停的请求、同步和释放，其本身也会消耗系统资源，反而不利于性能优化。
+
+### 4.2 Java虚拟机对锁优化所做的努力
+
+#### 1. 锁偏向
+
+使用虚拟机参数-XX:+UseBiasedLocking可以开启偏向锁。
+
+#### 2. 轻量级锁
+
+#### 3. 自旋锁
+
+#### 4. 锁消除
+
+以vector为例，如果是在单个线程里边运行，则变量逃逸分析ok后，虚拟机会消除锁。不过必须在-server模式下进行。
+
+## 4.3 人手一支笔：ThreadLocal
+
